@@ -290,4 +290,7 @@
 // A MCP Test: Control a lamp
 #define LAMP_GPIO GPIO_NUM_48
 
+#define GPS_UART_RX_PIN GPIO_NUM_39
+#define GPS_BAUD_RATE   9600
+
 #endif // _BOARD_CONFIG_H_
