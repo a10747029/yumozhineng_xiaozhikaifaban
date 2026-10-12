@@ -1068,9 +1068,40 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     preview_image_cached_ = std::move(image);
     auto img_dsc = preview_image_cached_->image_dsc();
     lv_image_set_src(preview_image_, img_dsc);
+
     if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
-        // zoom factor 0.5
-        lv_image_set_scale(preview_image_, 128 * width_ / img_dsc->header.w);
+        // Fit the complete image below the status bar and above the subtitle bar.
+        lv_obj_update_layout(status_bar_);
+        const lv_coord_t gap = 4;
+        const lv_coord_t image_top =
+            lv_obj_get_y(status_bar_) + lv_obj_get_height(status_bar_) + gap;
+        const lv_coord_t subtitle_height =
+            (bottom_bar_ != nullptr &&
+             !lv_obj_has_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN))
+                ? lv_obj_get_height(bottom_bar_)
+                : 0;
+        const lv_coord_t max_width = width_;
+        const lv_coord_t max_height =
+            height_ - image_top - subtitle_height - gap;
+
+        if (max_height <= 0) {
+            ESP_LOGW(TAG, "No room for camera preview below status bar");
+            return;
+        }
+
+        const lv_coord_t zoom_w =
+            (max_width * 256) / img_dsc->header.w;
+        const lv_coord_t zoom_h =
+            (max_height * 256) / img_dsc->header.h;
+        const lv_coord_t zoom = std::min(zoom_w, zoom_h);
+        const lv_coord_t scaled_width =
+            std::max<lv_coord_t>(1, img_dsc->header.w * zoom / 256);
+        const lv_coord_t scaled_height =
+            std::max<lv_coord_t>(1, img_dsc->header.h * zoom / 256);
+
+        lv_image_set_scale(preview_image_, zoom);
+        lv_obj_set_size(preview_image_, scaled_width, scaled_height);
+        lv_obj_align(preview_image_, LV_ALIGN_TOP_MID, 0, image_top);
     }
 
     // Hide emoji_box_

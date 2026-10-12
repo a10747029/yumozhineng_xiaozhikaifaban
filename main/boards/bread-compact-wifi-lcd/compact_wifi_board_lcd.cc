@@ -8,6 +8,9 @@
 #include "mcp_server.h"
 #include "lamp_controller.h"
 #include "led/single_led.h"
+#include "environment_sensors.h"
+#include "esp_video.h"
+#include "esp_video_init.h"
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -64,6 +67,8 @@ private:
  
     Button boot_button_;
     LcdDisplay* display_;
+    EspVideo* camera_;
+    EnvironmentSensors* environment_sensors_ = nullptr;
 
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
@@ -133,9 +138,44 @@ private:
         });
     }
 
+    void InitializeCamera() {
+        esp_video_init_usb_uvc_config_t usb_uvc_config = {
+            .uvc = {
+                .uvc_dev_num = 1,
+                .task_stack = 4096,
+                .task_priority = 5,
+                .task_affinity = -1,
+            },
+            .usb = {
+                .init_usb_host_lib = true,
+                .task_stack = 4096,
+                .task_priority = 5,
+                .task_affinity = -1,
+            },
+        };
+
+        esp_video_init_config_t video_config = {
+            .usb_uvc = &usb_uvc_config,
+        };
+
+        camera_ = new EspVideo(video_config);
+    }
+
     // 物联网初始化，添加对 AI 可见设备
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
+        environment_sensors_ = new EnvironmentSensors();
+
+        McpServer::GetInstance().AddTool(
+            "self.environment.read_sensors",
+            "读取 AHT20 温湿度、BMP280 温度/气压/估算海拔、AGS10 TVOC 和 GUVA-S12SD UV估算值。用户询问环境数据时调用。",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                if (environment_sensors_ == nullptr) {
+                    return std::string("环境传感器服务未初始化");
+                }
+                return environment_sensors_->ReadJson();
+            });
     }
 
 public:
@@ -144,6 +184,7 @@ public:
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeButtons();
+	InitializeCamera();
         InitializeTools();
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
@@ -169,6 +210,9 @@ public:
 
     virtual Display* GetDisplay() override {
         return display_;
+    }
+    virtual Camera* GetCamera() override {
+        return camera_;
     }
 
     virtual Backlight* GetBacklight() override {

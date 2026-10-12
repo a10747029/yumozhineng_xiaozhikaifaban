@@ -26,7 +26,11 @@
 #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_7
 
 #endif
-
+// Sensor connections from the provided Arduino sketch.
+#define SENSOR_I2C_SDA_PIN GPIO_NUM_18
+#define SENSOR_I2C_SCL_PIN GPIO_NUM_17
+#define SENSOR_I2C_CLOCK_HZ 10000
+#define UV_ADC_GPIO GPIO_NUM_9
 
 #define BUILTIN_LED_GPIO        GPIO_NUM_NC
 #define BOOT_BUTTON_GPIO        GPIO_NUM_NC
@@ -284,6 +288,6 @@
 
 
 // A MCP Test: Control a lamp
-#define LAMP_GPIO GPIO_NUM_18
+#define LAMP_GPIO GPIO_NUM_48
 
 #endif // _BOARD_CONFIG_H_
