@@ -27,12 +27,12 @@
 #define DISPLAY_SDA_PIN             I2C_SDA_IO
 #define DISPLAY_SCL_PIN             I2C_SCL_IO
 
-#define DISPLAY_MISO_PIN            GPIO_NUM_2
-#define DISPLAY_MOSI_PIN            GPIO_NUM_1
-#define DISPLAY_SCLK_PIN            GPIO_NUM_5
-#define DISPLAY_CS_PIN              GPIO_NUM_6
-#define DISPLAY_DC_PIN              GPIO_NUM_3
-#define DISPLAY_RESET_PIN           GPIO_NUM_NC
+#define DISPLAY_MISO_PIN            GPIO_NUM_NC
+#define DISPLAY_MOSI_PIN            GPIO_NUM_15
+#define DISPLAY_SCLK_PIN            GPIO_NUM_16
+#define DISPLAY_CS_PIN              GPIO_NUM_5
+#define DISPLAY_DC_PIN              GPIO_NUM_6
+#define DISPLAY_RESET_PIN           GPIO_NUM_7
 #define DISPLAY_BACKLIGHT_PIN       GPIO_NUM_NC
 #define DISPLAY_SPI_SCLK_HZ         (40 * 1000 * 1000)
 

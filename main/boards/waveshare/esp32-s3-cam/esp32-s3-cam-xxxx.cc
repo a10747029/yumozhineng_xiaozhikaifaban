@@ -257,7 +257,7 @@ public:
             InitializeSt7796Display();
         #endif
 
-        InitializeCamera();
+        //InitializeCamera();
 
     }
 
