@@ -902,6 +902,14 @@ void LcdDisplay::SetupUI() {
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
+    preview_direction_label_ = lv_label_create(screen);
+    lv_obj_set_width(preview_direction_label_, LV_HOR_RES);
+    lv_obj_set_style_text_align(preview_direction_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(
+    preview_direction_label_,
+    static_cast<LvglTheme*>(current_theme_)->text_color(), 0);
+    lv_label_set_text(preview_direction_label_, "");
+    lv_obj_add_flag(preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
     /* Layer 1: Top bar - for status icons */
     top_bar_ = lv_obj_create(screen);
     lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
@@ -1046,19 +1054,29 @@ void LcdDisplay::SetupUI() {
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
-
 void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     DisplayLockGuard lock(this);
+
     if (preview_image_ == nullptr) {
         ESP_LOGE(TAG, "Preview image is not initialized");
         return;
     }
 
     if (image == nullptr) {
-        esp_timer_stop(preview_timer_);
-        lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        if (preview_timer_ != nullptr) {
+            esp_timer_stop(preview_timer_);
+        }
+
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+        if (preview_direction_label_ != nullptr) {
+            lv_obj_add_flag(preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+
         preview_image_cached_.reset();
+
+        if (emoji_box_ != nullptr) {
+            lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        }
         if (gif_controller_) {
             gif_controller_->Start();
         }
@@ -1066,54 +1084,167 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     }
 
     preview_image_cached_ = std::move(image);
-    auto img_dsc = preview_image_cached_->image_dsc();
-    lv_image_set_src(preview_image_, img_dsc);
-
-    if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
-        // Fit the complete image below the status bar and above the subtitle bar.
-        lv_obj_update_layout(status_bar_);
-        const lv_coord_t gap = 4;
-        const lv_coord_t image_top =
-            lv_obj_get_y(status_bar_) + lv_obj_get_height(status_bar_) + gap;
-        const lv_coord_t subtitle_height =
-            (bottom_bar_ != nullptr &&
-             !lv_obj_has_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN))
-                ? lv_obj_get_height(bottom_bar_)
-                : 0;
-        const lv_coord_t max_width = width_;
-        const lv_coord_t max_height =
-            height_ - image_top - subtitle_height - gap;
-
-        if (max_height <= 0) {
-            ESP_LOGW(TAG, "No room for camera preview below status bar");
-            return;
-        }
-
-        const lv_coord_t zoom_w =
-            (max_width * 256) / img_dsc->header.w;
-        const lv_coord_t zoom_h =
-            (max_height * 256) / img_dsc->header.h;
-        const lv_coord_t zoom = std::min(zoom_w, zoom_h);
-        const lv_coord_t scaled_width =
-            std::max<lv_coord_t>(1, img_dsc->header.w * zoom / 256);
-        const lv_coord_t scaled_height =
-            std::max<lv_coord_t>(1, img_dsc->header.h * zoom / 256);
-
-        lv_image_set_scale(preview_image_, zoom);
-        lv_obj_set_size(preview_image_, scaled_width, scaled_height);
-        lv_obj_align(preview_image_, LV_ALIGN_TOP_MID, 0, image_top);
+    const auto* img_dsc = preview_image_cached_->image_dsc();
+    if (img_dsc == nullptr ||
+        img_dsc->header.w == 0 || img_dsc->header.h == 0) {
+        ESP_LOGE(TAG, "Camera preview has invalid image dimensions");
+        preview_image_cached_.reset();
+        return;
     }
 
-    // Hide emoji_box_
+    constexpr lv_coord_t kGap = 4;
+    constexpr lv_coord_t kDirectionRowHeight = 24;
+
+    lv_obj_update_layout(status_bar_);
+    if (bottom_bar_ != nullptr) {
+        lv_obj_update_layout(bottom_bar_);
+    }
+
+    const lv_coord_t image_top =
+        lv_obj_get_y(status_bar_) + lv_obj_get_height(status_bar_) + kGap;
+
+    // Reserve subtitle space even if it is currently hidden, since a subtitle
+    // can appear while the image preview is on screen.
+    const lv_coord_t subtitle_height =
+        bottom_bar_ != nullptr ? lv_obj_get_height(bottom_bar_) : 0;
+
+    const lv_coord_t available_width = width_;
+    const lv_coord_t available_height =
+        height_ - image_top - subtitle_height - kDirectionRowHeight - 2 * kGap;
+
+    if (available_width <= 0 || available_height <= 0) {
+        ESP_LOGW(TAG, "No room for camera preview below the status bar");
+        preview_image_cached_.reset();
+        return;
+    }
+
+    const lv_coord_t zoom_width =
+        (available_width * 256) / img_dsc->header.w;
+    const lv_coord_t zoom_height =
+        (available_height * 256) / img_dsc->header.h;
+
+    // Keep the aspect ratio and do not enlarge images beyond their original size.
+    const lv_coord_t zoom =
+        std::min<lv_coord_t>(256, std::min(zoom_width, zoom_height));
+
+    if (zoom <= 0) {
+        ESP_LOGW(TAG, "Camera preview scale is invalid");
+        preview_image_cached_.reset();
+        return;
+    }
+
+    const lv_coord_t scaled_width =
+        std::max<lv_coord_t>(1, img_dsc->header.w * zoom / 256);
+    const lv_coord_t scaled_height =
+        std::max<lv_coord_t>(1, img_dsc->header.h * zoom / 256);
+
+    lv_image_set_src(preview_image_, img_dsc);
+    lv_image_set_scale(preview_image_, zoom);
+    lv_obj_set_size(preview_image_, scaled_width, scaled_height);
+
+    // Position image immediately below the status bar, centered horizontally.
+    lv_obj_align(preview_image_, LV_ALIGN_TOP_MID, 0, image_top);
+
+    // Put direction text on its own row immediately below the image.
+    if (preview_direction_label_ != nullptr) {
+        lv_obj_align(preview_direction_label_, LV_ALIGN_TOP_MID, 0,
+                     image_top + scaled_height + kGap);
+        lv_label_set_text(
+            preview_direction_label_,
+            preview_direction_text_.empty()
+                ? ""
+                : preview_direction_text_.c_str());
+
+        if (preview_direction_visible_ &&
+            !preview_direction_text_.empty()) {
+            lv_obj_remove_flag(
+                preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(
+                preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     if (gif_controller_) {
         gif_controller_->Stop();
     }
-    lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
-    esp_timer_stop(preview_timer_);
-    ESP_ERROR_CHECK(esp_timer_start_once(preview_timer_, PREVIEW_IMAGE_DURATION_MS * 1000));
-}
+    if (emoji_box_ != nullptr) {
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
 
+    lv_obj_remove_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+
+    if (preview_timer_ != nullptr) {
+        esp_timer_stop(preview_timer_);
+        ESP_ERROR_CHECK(esp_timer_start_once(
+            preview_timer_, PREVIEW_IMAGE_DURATION_MS * 1000));
+    }
+}
+void LcdDisplay::SetDirectionIndicator(const char* direction, bool visible) {
+    DisplayLockGuard lock(this);
+
+    preview_direction_text_ = direction != nullptr ? direction : "";
+    preview_direction_visible_ =
+        visible && !preview_direction_text_.empty();
+
+    if (preview_direction_label_ == nullptr) {
+        return;
+    }
+
+    if (!preview_direction_visible_) {
+        lv_obj_add_flag(preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_label_set_text(
+        preview_direction_label_,
+        preview_direction_text_.c_str());
+    lv_obj_set_width(preview_direction_label_, LV_HOR_RES);
+    lv_obj_set_height(preview_direction_label_, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_align(
+        preview_direction_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_update_layout(preview_direction_label_);
+
+    // 表情可见时放在表情下方；拍照预览时放在照片下方。
+    lv_obj_t* anchor = nullptr;
+
+    if (emoji_box_ != nullptr &&
+        !lv_obj_has_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN)) {
+        anchor = emoji_box_;
+    } else if (preview_image_ != nullptr &&
+               !lv_obj_has_flag(preview_image_, LV_OBJ_FLAG_HIDDEN)) {
+        anchor = preview_image_;
+    } else if (emoji_box_ == nullptr) {
+        // 兼容没有 emoji_box_ 的显示布局。
+        if (emoji_image_ != nullptr &&
+            !lv_obj_has_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN)) {
+            anchor = emoji_image_;
+        } else if (emoji_label_ != nullptr &&
+                   !lv_obj_has_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN)) {
+            anchor = emoji_label_;
+        }
+    }
+
+    lv_coord_t label_y = 0;
+    constexpr lv_coord_t kGap = 8;
+
+    if (anchor != nullptr) {
+        lv_obj_update_layout(anchor);
+        label_y = lv_obj_get_y(anchor) + lv_obj_get_height(anchor) + kGap;
+    } else {
+        // 没有可见表情或照片时，放在屏幕中部偏下。
+        lv_obj_align(
+            preview_direction_label_, LV_ALIGN_CENTER, 0, 64);
+        lv_obj_remove_flag(preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(preview_direction_label_);
+        return;
+    }
+
+    lv_obj_align(
+        preview_direction_label_, LV_ALIGN_TOP_MID, 0, label_y);
+    lv_obj_remove_flag(preview_direction_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(preview_direction_label_);
+}
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetChatMessage('%s', '%s') called before SetupUI() - message will be lost!",

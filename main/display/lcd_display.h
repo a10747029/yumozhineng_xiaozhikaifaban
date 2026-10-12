@@ -6,6 +6,7 @@
 
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
+#include <string.h>
 #include <atomic>
 #include <memory>
 
@@ -31,6 +32,10 @@ protected:
     lv_obj_t* chat_message_label_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
+    lv_obj_t* preview_direction_label_ = nullptr;
+    bool preview_direction_visible_ = false;
+    std::string preview_direction_text_;
+
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
     void InitializeLcdThemes();
@@ -54,6 +59,7 @@ public:
 
     // Set whether to hide chat messages/subtitles
     virtual void SetHideSubtitle(bool hide) override;
+    void SetDirectionIndicator(const char* direction, bool visible);
 };
 
 // SPI LCD display
