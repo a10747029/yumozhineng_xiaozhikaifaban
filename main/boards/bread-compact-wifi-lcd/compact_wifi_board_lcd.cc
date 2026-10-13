@@ -6,8 +6,6 @@
 #include "button.h"
 #include "config.h"
 #include "mcp_server.h"
-#include "lamp_controller.h"
-#include "led/single_led.h"
 #include "environment_sensors.h"
 #include "esp_video.h"
 #include "esp_video_init.h"
@@ -26,6 +24,10 @@
 #include <driver/spi_common.h>
 #include <driver/uart.h>
 #include <esp_timer.h>
+#include "led/led.h"
+
+#include <led_strip.h>
+#include <mutex>
 
 #include <array>
 #include <atomic>
@@ -772,7 +774,102 @@ private:
         }
     }
 };
+class Ws2812Lamp : public Led {
+public:
+    explicit Ws2812Lamp(gpio_num_t gpio) {
+        led_strip_config_t strip_config = {};
+        strip_config.strip_gpio_num = gpio;
+        strip_config.max_leds = 1;
+        strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
+        strip_config.led_model = LED_MODEL_WS2812;
 
+        led_strip_rmt_config_t rmt_config = {};
+        rmt_config.resolution_hz = 10 * 1000 * 1000;
+
+        ESP_ERROR_CHECK(
+            led_strip_new_rmt_device(&strip_config, &rmt_config, &strip_));
+        ESP_ERROR_CHECK(led_strip_clear(strip_));
+    }
+
+    ~Ws2812Lamp() override {
+        if (strip_ != nullptr) {
+            led_strip_del(strip_);
+        }
+    }
+
+    // GPIO48 现在是用户控制的灯，不另行执行 SingleLed 的状态灯动画。
+    void OnStateChanged() override {}
+
+    void RegisterTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool(
+            "self.lamp.get_state", "Get the power state of the WS2812 lamp",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                std::lock_guard<std::mutex> lock(mutex_);
+                return on_ ? "{\"power\": true}" : "{\"power\": false}";
+            });
+
+        mcp.AddTool(
+            "self.lamp.turn_on", "Turn on the WS2812 lamp",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                std::lock_guard<std::mutex> lock(mutex_);
+                on_ = true;
+                return RefreshLocked();
+            });
+
+        mcp.AddTool(
+            "self.lamp.turn_off", "Turn off the WS2812 lamp",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                std::lock_guard<std::mutex> lock(mutex_);
+                on_ = false;
+                return RefreshLocked();
+            });
+
+        mcp.AddTool(
+            "self.lamp.set_color",
+            "Set the WS2812 lamp color using red, green and blue values from 0 to 255.",
+            PropertyList({
+                Property("red", kPropertyTypeInteger, 255, 0, 255),
+                Property("green", kPropertyTypeInteger, 160, 0, 255),
+                Property("blue", kPropertyTypeInteger, 0, 0, 255),
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::lock_guard<std::mutex> lock(mutex_);
+                red_ = static_cast<uint8_t>(properties["red"].value<int>());
+                green_ = static_cast<uint8_t>(properties["green"].value<int>());
+                blue_ = static_cast<uint8_t>(properties["blue"].value<int>());
+                on_ = true;
+                return RefreshLocked();
+            });
+    }
+
+private:
+    led_strip_handle_t strip_ = nullptr;
+    std::mutex mutex_;
+    bool on_ = false;
+    uint8_t red_ = 255;
+    uint8_t green_ = 160;
+    uint8_t blue_ = 0;
+
+    bool RefreshLocked() {
+        if (strip_ == nullptr) {
+            return false;
+        }
+
+        if (!on_) {
+            return led_strip_clear(strip_) == ESP_OK;
+        }
+
+        if (led_strip_set_pixel(strip_, 0, red_, green_, blue_) != ESP_OK) {
+            return false;
+        }
+        return led_strip_refresh(strip_) == ESP_OK;
+    }
+};
 class CompactWifiBoardLCD : public WifiBoard {
 private:
  
@@ -781,6 +878,7 @@ private:
     EspVideo* camera_;
     EnvironmentSensors* environment_sensors_ = nullptr;
     GpsService gps_service_;
+    Ws2812Lamp ws2812_lamp_{WS2812_GPIO};
 
     static constexpr size_t kTdoaWindowFrames = 2048;
     static constexpr int kMaxLagSamples = 8;
@@ -896,7 +994,7 @@ private:
 
     // 物联网初始化，添加对 AI 可见设备
     void InitializeTools() {
-        static LampController lamp(LAMP_GPIO);
+	ws2812_lamp_.RegisterTools();
         environment_sensors_ = new EnvironmentSensors();
 
         McpServer::GetInstance().AddTool(
@@ -941,10 +1039,8 @@ public:
     }
 
     virtual Led* GetLed() override {
-        static SingleLed led(BUILTIN_LED_GPIO);
-        return &led;
+    return &ws2812_lamp_;
     }
-
     virtual AudioCodec* GetAudioCodec() override {
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
         //static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
