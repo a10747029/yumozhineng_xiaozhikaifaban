@@ -870,7 +870,7 @@ private:
         return led_strip_refresh(strip_) == ESP_OK;
     }
 };
-class CompactWifiBoardLCD : public WifiBoard {
+class CompactWifiBoardLCD : public DualNetworkBoard {
 private:
  
     Button boot_button_;
