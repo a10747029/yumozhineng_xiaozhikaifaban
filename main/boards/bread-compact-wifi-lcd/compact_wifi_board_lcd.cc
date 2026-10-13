@@ -1,4 +1,4 @@
-#include "wifi_board.h"
+#include "dual_network_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/lcd_display.h"
 #include "system_reset.h"
@@ -870,7 +870,7 @@ private:
         return led_strip_refresh(strip_) == ESP_OK;
     }
 };
-class CompactWifiBoardLCD : public WifiBoard {
+class CompactWifiBoardLCD : public DualNetworkBoard {
 private:
  
     Button boot_button_;
@@ -961,8 +961,10 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
+            if (GetNetworkType() == NetworkType::WIFI &&
+                app.GetDeviceState() == kDeviceStateStarting) {
+                auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+                wifi_board.EnterWifiConfigMode();
                 return;
             }
             app.ToggleChatState();
@@ -998,6 +1000,33 @@ private:
         environment_sensors_ = new EnvironmentSensors();
 
         McpServer::GetInstance().AddTool(
+            "self.network.switch",
+            "Switch between Wi-Fi and 4G (ML307). Call only when the user explicitly asks "
+            "to switch networks. The device will reboot to apply the selected network.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                auto can_switch = [](DeviceState state) {
+                    return state != kDeviceStateUnknown &&
+                           state != kDeviceStateUpgrading &&
+                           state != kDeviceStateActivating &&
+                           state != kDeviceStateAudioTesting &&
+                           state != kDeviceStateFatalError;
+                };
+                auto& app = Application::GetInstance();
+                if (!can_switch(app.GetDeviceState())) {
+                    return std::string("Network switching is unavailable in the current device state");
+                }
+
+                app.Schedule([this, can_switch]() {
+                    auto& app = Application::GetInstance();
+                    if (can_switch(app.GetDeviceState())) {
+                        SwitchNetworkType();
+                    }
+                });
+                return std::string("Network switch scheduled; the device will reboot");
+            });
+
+        McpServer::GetInstance().AddTool(
             "self.environment.read_sensors",
             "读取 AHT20 温湿度、BMP280 温度/气压/估算海拔、AGS10 TVOC 和 GUVA-S12SD UV估算值。用户询问环境数据时调用。",
             PropertyList(),
@@ -1023,6 +1052,7 @@ private:
 
 public:
     CompactWifiBoardLCD() :
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 0),
         boot_button_(BOOT_BUTTON_GPIO) {
         InitializeSpi();
         InitializeLcdDisplay();
