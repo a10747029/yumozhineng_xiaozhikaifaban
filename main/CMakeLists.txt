@@ -1088,6 +1088,11 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
         sdmmc
     )
 endif()
+if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD)
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA
+        waveshare__esp_lcd_st7735
+    )
+endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}

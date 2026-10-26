@@ -6,7 +6,6 @@
 #include "button.h"
 #include "config.h"
 #include "mcp_server.h"
-#include "environment_sensors.h"
 #include "esp_video.h"
 #include "esp_video_init.h"
 #include <cmath>
@@ -17,7 +16,6 @@
 #include <cstdint>
 #include <esp_timer.h>
 #include <esp_log.h>
-#include <driver/i2c_master.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
@@ -40,6 +38,10 @@
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
 #include "esp_lcd_ili9341.h"
+#endif
+
+#if defined(LCD_TYPE_ST7735_SERIAL)
+#include "esp_lcd_st7735.h"
 #endif
 
 #if defined(LCD_TYPE_GC9A01_SERIAL)
@@ -876,7 +878,6 @@ private:
     Button boot_button_;
     LcdDisplay* display_;
     EspVideo* camera_;
-    EnvironmentSensors* environment_sensors_ = nullptr;
     GpsService gps_service_;
     Ws2812Lamp ws2812_lamp_{WS2812_GPIO};
 
@@ -935,6 +936,8 @@ private:
         panel_config.bits_per_pixel = 16;
 #if defined(LCD_TYPE_ILI9341_SERIAL)
         ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(panel_io, &panel_config, &panel));
+#elif defined(LCD_TYPE_ST7735_SERIAL)
+        ESP_ERROR_CHECK(esp_lcd_new_panel_st7735(panel_io, &panel_config, &panel));
 #elif defined(LCD_TYPE_GC9A01_SERIAL)
         ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel));
         gc9a01_vendor_config_t gc9107_vendor_config = {
@@ -951,11 +954,18 @@ private:
         esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+#if defined(LCD_TYPE_ST7735_SERIAL)
+        ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y));
+#endif
 #ifdef  LCD_TYPE_GC9A01_SERIAL
         panel_config.vendor_config = &gc9107_vendor_config;
 #endif
         display_ = new SpiLcdDisplay(panel_io, panel,
+#if defined(LCD_TYPE_ST7735_SERIAL)
+                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 0, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#else
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#endif
     }
 
     void InitializeButtons() {
@@ -997,7 +1007,6 @@ private:
     // 物联网初始化，添加对 AI 可见设备
     void InitializeTools() {
 	ws2812_lamp_.RegisterTools();
-        environment_sensors_ = new EnvironmentSensors();
 	McpServer::GetInstance().AddTool(
             "self.network.switch",
             "Switch between Wi-Fi and 4G (ML307). Call only when the user explicitly asks "
@@ -1023,17 +1032,6 @@ private:
                     }
                 });
                 return std::string("Network switch scheduled; the device will reboot");
-            });
-
-        McpServer::GetInstance().AddTool(
-            "self.environment.read_sensors",
-            "读取 AHT20 温湿度、BMP280 温度/气压/估算海拔、AGS10 TVOC 和 GUVA-S12SD UV估算值。用户询问环境数据时调用。",
-            PropertyList(),
-            [this](const PropertyList&) -> ReturnValue {
-                if (environment_sensors_ == nullptr) {
-                    return std::string("环境传感器服务未初始化");
-                }
-                return environment_sensors_->ReadJson();
             });
 
 	    auto& mcp_server = McpServer::GetInstance();
