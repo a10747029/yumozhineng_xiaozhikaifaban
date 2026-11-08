@@ -1066,9 +1066,6 @@ if(CONFIG_IDF_TARGET_ESP32S3)
 endif()
 
 set(MAIN_PRIV_REQUIRES_EXTRA "")
-if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD)
-    list(APPEND MAIN_PRIV_REQUIRES_EXTRA esp_driver_twai)
-endif()
 if(BOARD_TYPE STREQUAL "m5stack-stick-s3")
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
         m5stack__m5pm1
@@ -1109,6 +1106,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_jpeg
                         esp_driver_ppa
                         esp_driver_tsens
+                        esp_driver_twai
                         esp_app_format
                         app_update
                         spi_flash
