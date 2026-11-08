@@ -5,7 +5,12 @@
         {
             "name": "bread-compact-wifi-lcd",
             "sdkconfig_append": [
-                "CONFIG_LCD_ST7789_240X320=y"
+                "CONFIG_LCD_ST7789_240X320=y",
+		"CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT=y",
+		"CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE=y",
+		"CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE=y",
+		"CONFIG_USB_UVC_VIDEO_DEVICE_URB_SIZE=10240",
+		"CONFIG_USB_UVC_INIT_TIMEOUT_MS=10000"
             ]
         }
     ]
