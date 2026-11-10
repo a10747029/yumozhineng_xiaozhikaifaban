@@ -17,6 +17,54 @@ constexpr uint8_t kAhtAddress = 0x38;
 constexpr uint8_t kBmpAddress = 0x77;
 constexpr uint8_t kAgsAddress = 0x1A;
 constexpr int64_t kAgsMinimumIntervalUs = 2000000;
+
+void ScanI2cBus(i2c_master_bus_handle_t bus) {
+    i2c_device_config_t config = {};
+    config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    config.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+    config.scl_speed_hz = SENSOR_I2C_CLOCK_HZ;
+
+    i2c_master_dev_handle_t scanner = nullptr;
+    esp_err_t err = i2c_master_bus_add_device(bus, &config, &scanner);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C scan setup failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "I2C scan started: SDA=%d SCL=%d speed=%d Hz (7-bit addresses 0x08-0x77)",
+             SENSOR_I2C_SDA_PIN, SENSOR_I2C_SCL_PIN, SENSOR_I2C_CLOCK_HZ);
+
+    uint8_t address_byte = 0;
+    i2c_operation_job_t operations[3] = {};
+    operations[0].command = I2C_MASTER_CMD_START;
+    operations[1].command = I2C_MASTER_CMD_WRITE;
+    operations[1].write.ack_check = true;
+    operations[1].write.data = &address_byte;
+    operations[1].write.total_bytes = 1;
+    operations[2].command = I2C_MASTER_CMD_STOP;
+
+    unsigned found = 0;
+    unsigned errors = 0;
+    for (unsigned address = 0x08; address <= 0x77; ++address) {
+        address_byte = static_cast<uint8_t>(address << 1);
+        err = i2c_master_execute_defined_operations(
+            scanner, operations, sizeof(operations) / sizeof(operations[0]), 50);
+        if (err == ESP_OK) {
+            ++found;
+            ESP_LOGI(TAG, "I2C ACK at 7-bit address 0x%02X", address);
+        } else if (err != ESP_ERR_INVALID_RESPONSE) {
+            ++errors;
+            ESP_LOGW(TAG, "I2C scan address 0x%02X failed: %s",
+                     address, esp_err_to_name(err));
+        }
+    }
+
+    err = i2c_master_bus_rm_device(scanner);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C scan cleanup failed: %s", esp_err_to_name(err));
+    }
+    ESP_LOGI(TAG, "I2C scan finished: %u ACK, %u errors", found, errors);
+}
 }  // namespace
 
 EnvironmentSensors::EnvironmentSensors() {
@@ -36,6 +84,8 @@ EnvironmentSensors::EnvironmentSensors() {
         ESP_LOGE(TAG, "Create I2C bus failed: %s", esp_err_to_name(err));
         return;
     }
+
+    ScanI2cBus(i2c_bus_);
 
     aht_ok_ = AddI2cDevice(kAhtAddress, &aht_device_) && InitializeAht20();
     bmp_ok_ = AddI2cDevice(kBmpAddress, &bmp_device_) && InitializeBmp280();
