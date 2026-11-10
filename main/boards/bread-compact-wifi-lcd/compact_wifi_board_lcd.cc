@@ -563,11 +563,27 @@ private:
     void ReadTask() {
         std::array<uint8_t, 128> bytes{};
         std::array<char, kLineBufferSize> line{};
+        std::array<uint8_t, 16> sample{};
         size_t line_length = 0;
+        size_t sample_length = 0;
+        size_t bytes_in_interval = 0;
+        size_t lines_in_interval = 0;
+        int64_t interval_start_us = esp_timer_get_time();
 
         while (true) {
             const int count = uart_read_bytes(
                 UART_NUM_1, bytes.data(), bytes.size(), pdMS_TO_TICKS(100));
+
+            if (count < 0) {
+                ESP_LOGE(TAG, "GPS UART read failed: %d", count);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+
+            bytes_in_interval += count;
+            for (int i = 0; i < count && sample_length < sample.size(); ++i) {
+                sample[sample_length++] = bytes[i];
+            }
 
             for (int i = 0; i < count; ++i) {
                 const char c = static_cast<char>(bytes[i]);
@@ -579,6 +595,17 @@ private:
                 if (c == '\n') {
                     if (line_length > 0) {
                         line[line_length] = '\0';
+                        ++lines_in_interval;
+                        const bool printable = std::all_of(
+                            line.begin(), line.begin() + line_length,
+                            [](char ch) { return ch >= 0x20 && ch <= 0x7e; });
+                        if (printable) {
+                            ESP_LOGI(TAG, "GPS UART raw: %s", line.data());
+                        } else {
+                            ESP_LOGW(TAG, "GPS UART line contains non-printable bytes:");
+                            ESP_LOG_BUFFER_HEX_LEVEL(TAG, line.data(), line_length,
+                                                     ESP_LOG_WARN);
+                        }
                         ParseLine(line.data());
                         line_length = 0;
                     }
@@ -589,8 +616,27 @@ private:
                     line[line_length++] = c;
                 } else {
                     // An overlong/corrupt line: discard it and resync at newline.
+                    ESP_LOGW(TAG, "GPS UART line exceeds %u bytes",
+                             static_cast<unsigned>(line.size() - 1));
                     line_length = 0;
                 }
+            }
+
+            const int64_t now_us = esp_timer_get_time();
+            if (now_us - interval_start_us >= 10000000) {
+                if (bytes_in_interval == 0) {
+                    ESP_LOGW(TAG, "GPS UART: no bytes received in 10 seconds (RX GPIO%d)",
+                             GPS_UART_RX_PIN);
+                } else if (lines_in_interval == 0) {
+                    ESP_LOGW(TAG, "GPS UART: received %u bytes but no complete line in 10 seconds; first bytes:",
+                             static_cast<unsigned>(bytes_in_interval));
+                    ESP_LOG_BUFFER_HEX_LEVEL(TAG, sample.data(), sample_length,
+                                             ESP_LOG_WARN);
+                }
+                interval_start_us = now_us;
+                bytes_in_interval = 0;
+                lines_in_interval = 0;
+                sample_length = 0;
             }
         }
     }
