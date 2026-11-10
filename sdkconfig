@@ -1769,6 +1769,19 @@ CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 # end of ESP-Driver:Temperature Sensor Configurations
 
 #
+# ESP-Driver:TWAI Configurations
+#
+# default:
+# CONFIG_TWAI_ISR_IN_IRAM is not set
+# default:
+# CONFIG_TWAI_IO_FUNC_IN_IRAM is not set
+# default:
+# CONFIG_TWAI_ISR_CACHE_SAFE is not set
+# default:
+# CONFIG_TWAI_ENABLE_DEBUG_LOG is not set
+# end of ESP-Driver:TWAI Configurations
+
+#
 # ESP-Driver:UART Configurations
 #
 CONFIG_UART_ISR_IN_IRAM=y
@@ -4809,9 +4822,7 @@ CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE=y
 # default:
 # CONFIG_ESP_VIDEO_ENABLE_SPI_VIDEO_DEVICE is not set
 CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE=y
-# default:
 CONFIG_USB_UVC_VIDEO_DEVICE_URB_SIZE=10240
-# default:
 CONFIG_USB_UVC_INIT_TIMEOUT_MS=10000
 # default:
 # CONFIG_ESP_VIDEO_USE_CUSTOMIZED_ESP_H264_VERSION is not set

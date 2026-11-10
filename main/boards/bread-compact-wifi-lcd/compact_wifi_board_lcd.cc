@@ -9,6 +9,7 @@
 #include "environment_sensors.h"
 #include "esp_video.h"
 #include "esp_video_init.h"
+#include "vehicle_can.h"
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -879,6 +880,7 @@ private:
     EnvironmentSensors* environment_sensors_ = nullptr;
     GpsService gps_service_;
     Ws2812Lamp ws2812_lamp_{WS2812_GPIO};
+    VehicleCan vehicle_can_;
 
     static constexpr size_t kTdoaWindowFrames = 2048;
     static constexpr int kMaxLagSamples = 8;
@@ -998,6 +1000,17 @@ private:
     void InitializeTools() {
 	ws2812_lamp_.RegisterTools();
         environment_sensors_ = new EnvironmentSensors();
+
+	McpServer::GetInstance().AddTool(
+            "self.vehicle.get_status",
+            "查询车辆CAN总线的最新车速、车辆电量和转向灯状态。用户询问车速、汽车电量、"
+            "左转或右转时必须调用。结果包含每项数据的接收时间；未收到或无效的数据不得猜测，"
+            "时间较久的数据可能已经过期，车速单位未指定，不要自行添加单位。",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                return vehicle_can_.GetReport();
+            });
+
 	McpServer::GetInstance().AddTool(
             "self.network.switch",
             "Switch between Wi-Fi and 4G (ML307). Call only when the user explicitly asks "
@@ -1036,7 +1049,7 @@ private:
                 return environment_sensors_->ReadJson();
             });
 
-	    auto& mcp_server = McpServer::GetInstance();
+	auto& mcp_server = McpServer::GetInstance();
 	mcp_server.AddTool(
         "self.gps.get_info",
         "查询GPS实时状态。用户询问“我在哪里”、当前位置、经纬度、GPS定位状态、"
@@ -1060,6 +1073,9 @@ public:
 	if (!gps_service_.Start()) {
    		ESP_LOGE(TAG, "GPS service failed to start");
 	}
+	if (!vehicle_can_.Start()) {
+            ESP_LOGE(TAG, "Vehicle CAN service failed to start");
+        }
         InitializeTools();
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
