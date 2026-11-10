@@ -438,41 +438,50 @@ public:
             .source_clk = UART_SCLK_DEFAULT,
         };
 
-        esp_err_t err = uart_driver_install(UART_NUM_1, 2048, 0, 0, nullptr, 0);
+        esp_err_t err = uart_driver_install(kUartPort, 2048, 0, 0, nullptr, 0);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "GPS uart_driver_install failed: %s",
                      esp_err_to_name(err));
             return false;
         }
 
-        err = uart_param_config(UART_NUM_1, &uart_config);
+        err = uart_param_config(kUartPort, &uart_config);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "GPS uart_param_config failed: %s",
                      esp_err_to_name(err));
-            uart_driver_delete(UART_NUM_1);
+            uart_driver_delete(kUartPort);
             return false;
         }
 
-        // GPS is receive-only here. Do not assign GPIO40 as UART TX:
-        // GPIO40 is used by the LCD DC signal on this board.
-        err = uart_set_pin(UART_NUM_1, UART_PIN_NO_CHANGE, GPS_UART_RX_PIN,
+        gpio_config_t gps_gpio = {};
+        gps_gpio.pin_bit_mask = 1ULL << GPS_UART_RX_PIN;
+        gps_gpio.mode = GPIO_MODE_INPUT;
+        err = gpio_config(&gps_gpio);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "GPS gpio_config failed: %s", esp_err_to_name(err));
+            uart_driver_delete(kUartPort);
+            return false;
+        }
+
+        // GPS is receive-only; leave the UART TX pin unassigned.
+        err = uart_set_pin(kUartPort, UART_PIN_NO_CHANGE, GPS_UART_RX_PIN,
                            UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "GPS uart_set_pin failed: %s",
                      esp_err_to_name(err));
-            uart_driver_delete(UART_NUM_1);
+            uart_driver_delete(kUartPort);
             return false;
         }
 
         if (xTaskCreate(TaskEntry, "gps_uart", 4096, this, 4, nullptr) != pdPASS) {
             ESP_LOGE(TAG, "Failed to create GPS reader task");
-            uart_driver_delete(UART_NUM_1);
+            uart_driver_delete(kUartPort);
             return false;
         }
 
         started_.store(true);
-        ESP_LOGI(TAG, "GPS UART reader started: UART1 RX=%d baud=%d",
-                 GPS_UART_RX_PIN, GPS_BAUD_RATE);
+        ESP_LOGI(TAG, "GPS UART reader started: UART%d RX=%d baud=%d",
+                 kUartPort, GPS_UART_RX_PIN, GPS_BAUD_RATE);
         return true;
     }
 
@@ -533,6 +542,8 @@ public:
     }
 
 private:
+    // UART1 is used by the ML307 modem.
+    static constexpr uart_port_t kUartPort = UART_NUM_2;
     static constexpr size_t kLineBufferSize = 128;
 
     std::atomic<bool> started_{false};
@@ -572,7 +583,7 @@ private:
 
         while (true) {
             const int count = uart_read_bytes(
-                UART_NUM_1, bytes.data(), bytes.size(), pdMS_TO_TICKS(100));
+                kUartPort, bytes.data(), bytes.size(), pdMS_TO_TICKS(100));
 
             if (count < 0) {
                 ESP_LOGE(TAG, "GPS UART read failed: %d", count);
